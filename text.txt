@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <title>Calendar Circles</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;margin:0;background:#0f0f10;color:#fff}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 6px}
+    button{background:#1f1f22;border:1px solid #2c2c30;color:#fff;border-radius:10px;padding:10px 12px;font-size:16px}
+    .title{font-weight:700;font-size:18px}
+    .wrap{padding:10px 14px 18px}
+    .week{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:10px 0 8px}
+    .dow{opacity:.7;font-size:12px;text-align:center}
+    .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}
+    .day{position:relative;aspect-ratio:1/1;border-radius:14px;background:#17171a;border:1px solid #242428;display:flex;align-items:flex-start;justify-content:flex-start;padding:8px}
+    .day.out{opacity:.35}
+    .num{font-size:14px;font-weight:600}
+    .today{outline:2px solid #3a3a44}
+    .dot{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);width:14px;height:14px;border-radius:999px}
+    .hint{opacity:.7;font-size:13px;margin-top:10px;line-height:1.35}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .chip{display:flex;align-items:center;gap:8px;background:#17171a;border:1px solid #242428;border-radius:999px;padding:8px 10px;font-size:13px;opacity:.9}
+    .chip .mini{width:10px;height:10px;border-radius:999px}
+    dialog{border:none;border-radius:16px;padding:0;background:#141418;color:#fff;width:min(92vw,380px)}
+    dialog::backdrop{background:rgba(0,0,0,.6)}
+    .dlg{padding:14px}
+    .dlg h3{margin:0 0 10px;font-size:16px}
+    .colors{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .cbtn{height:44px;border-radius:12px;border:1px solid #2c2c30;background:#1f1f22}
+    .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+    .danger{border-color:#3a1f1f}
+  </style>
+</head>
+<body>
+  <header>
+    <button id="prev">◀</button>
+    <div class="title" id="monthTitle"></div>
+    <button id="next">▶</button>
+  </header>
+
+  <div class="wrap">
+    <div class="week" id="dow"></div>
+    <div class="grid" id="grid"></div>
+
+    <div class="row" id="legend"></div>
+    <div class="hint">Tap a date to add/change a colored circle. Long-press (or tap again) to clear.</div>
+  </div>
+
+  <dialog id="picker">
+    <div class="dlg">
+      <h3 id="pickTitle">Pick a color</h3>
+      <div class="colors" id="colorButtons"></div>
+      <div class="actions">
+        <button id="clear" class="danger">Clear</button>
+        <button id="cancel">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+<script>
+  // --- PWA offline
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js");
+
+  // --- Color palette (name -> hex)
+  const PALETTE = [
+    {name:"Red",    hex:"#ff3b30"},
+    {name:"Orange", hex:"#ff9500"},
+    {name:"Yellow", hex:"#ffd60a"},
+    {name:"Green",  hex:"#34c759"},
+    {name:"Blue",   hex:"#0a84ff"},
+    {name:"Purple", hex:"#bf5af2"},
+    {name:"Pink",   hex:"#ff2d55"},
+    {name:"Gray",   hex:"#8e8e93"},
+  ];
+
+  const storeKey = "calendar_circles_v1";
+  const state = {
+    current: new Date(),
+    marks: loadMarks()
+  };
+
+  const gridEl = document.getElementById("grid");
+  const titleEl = document.getElementById("monthTitle");
+  const dowEl = document.getElementById("dow");
+  const legendEl = document.getElementById("legend");
+
+  const dlg = document.getElementById("picker");
+  const pickTitle = document.getElementById("pickTitle");
+  const colorButtons = document.getElementById("colorButtons");
+  const clearBtn = document.getElementById("clear");
+  const cancelBtn = document.getElementById("cancel");
+
+  let selectedKey = null;
+
+  function pad(n){ return String(n).padStart(2,"0"); }
+  function keyForDate(d){
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+
+  function loadMarks(){
+    try { return JSON.parse(localStorage.getItem(storeKey) || "{}"); }
+    catch { return {}; }
+  }
+  function saveMarks(){
+    localStorage.setItem(storeKey, JSON.stringify(state.marks));
+  }
+
+  function monthLabel(d){
+    return d.toLocaleString(undefined, {month:"long", year:"numeric"});
+  }
+
+  function startGridDate(d){
+    const first = new Date(d.getFullYear(), d.getMonth(), 1);
+    const day = (first.getDay()+6)%7; // Mon=0..Sun=6
+    const start = new Date(first);
+    start.setDate(first.getDate() - day);
+    return start;
+  }
+
+  function render(){
+    titleEl.textContent = monthLabel(state.current);
+
+    // DOW (Mon..Sun)
+    const labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    dowEl.innerHTML = labels.map(l=>`<div class="dow">${l}</div>`).join("");
+
+    // Month grid (6 weeks)
+    const start = startGridDate(state.current);
+    const todayKey = keyForDate(new Date());
+
+    gridEl.innerHTML = "";
+    for(let i=0;i<42;i++){
+      const d = new Date(start);
+      d.setDate(start.getDate()+i);
+
+      const inMonth = d.getMonth() === state.current.getMonth();
+      const k = keyForDate(d);
+      const mark = state.marks[k]; // stores palette index
+      const cell = document.createElement("div");
+      cell.className = "day" + (inMonth ? "" : " out") + (k===todayKey ? " today" : "");
+      cell.innerHTML = `<div class="num">${d.getDate()}</div>` + (mark!=null ? `<div class="dot" style="background:${PALETTE[mark].hex}"></div>`:"");
+      cell.addEventListener("click", ()=>openPicker(k, d));
+      gridEl.appendChild(cell);
+    }
+
+    // Legend
+    legendEl.innerHTML = "";
+    PALETTE.forEach((c, idx)=>{
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.innerHTML = `<span class="mini" style="background:${c.hex}"></span>${c.name}`;
+      legendEl.appendChild(chip);
+    });
+  }
+
+  function openPicker(k, dateObj){
+    selectedKey = k;
+    pickTitle.textContent = `Circle color for ${dateObj.toLocaleDateString()}`;
+
+    // Build buttons
+    colorButtons.innerHTML = "";
+    PALETTE.forEach((c, idx)=>{
+      const b = document.createElement("button");
+      b.className = "cbtn";
+      b.style.background = c.hex;
+      b.style.borderColor = "#2c2c30";
+      b.title = c.name;
+      b.addEventListener("click", ()=>{
+        state.marks[selectedKey] = idx;
+        saveMarks();
+        dlg.close();
+        render();
+      });
+      colorButtons.appendChild(b);
+    });
+
+    dlg.showModal();
+  }
+
+  clearBtn.addEventListener("click", ()=>{
+    if(selectedKey){
+      delete state.marks[selectedKey];
+      saveMarks();
+      dlg.close();
+      render();
+    }
+  });
+  cancelBtn.addEventListener("click", ()=>dlg.close());
+
+  document.getElementById("prev").addEventListener("click", ()=>{
+    state.current = new Date(state.current.getFullYear(), state.current.getMonth()-1, 1);
+    render();
+  });
+  document.getElementById("next").addEventListener("click", ()=>{
+    state.current = new Date(state.current.getFullYear(), state.current.getMonth()+1, 1);
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
