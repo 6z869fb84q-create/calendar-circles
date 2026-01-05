@@ -6,102 +6,190 @@
 <title>Calendar Circles</title>
 
 <style>
-body{
-  margin:0;
-  font-family:-apple-system,BlinkMacSystemFont,Arial;
-  background:#111;
-  color:#fff;
-}
-header{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:12px;
-}
-button{
-  background:#222;
-  border:1px solid #333;
-  color:#fff;
-  border-radius:10px;
-  padding:8px 12px;
-}
-.grid{
-  display:grid;
-  grid-template-columns:repeat(7,1fr);
-  gap:8px;
-  padding:12px;
-}
-.day{
-  aspect-ratio:1;
-  border-radius:14px;
-  background:#1a1a1a;
-  position:relative;
-  padding:6px;
-}
-.num{font-size:13px}
-.dot{
-  width:14px;
-  height:14px;
-  border-radius:50%;
-  position:absolute;
-  bottom:8px;
-  left:50%;
-  transform:translateX(-50%);
-}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Arial;background:#111;color:#fff}
+  header{display:flex;align-items:center;justify-content:space-between;padding:12px;gap:10px}
+  button{background:#222;border:1px solid #333;color:#fff;border-radius:10px;padding:8px 12px;font-size:16px}
+  #title{flex:1;text-align:center;font-weight:700}
+  #grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;padding:12px}
+  .day{aspect-ratio:1;border-radius:14px;background:#1a1a1a;position:relative;padding:6px;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+  .num{font-size:13px;opacity:.95}
+  .shift{font-size:11px;opacity:.8;margin-top:2px;word-break:break-word}
+  .dot{width:14px;height:14px;border-radius:50%;position:absolute;bottom:8px;left:50%;transform:translateX(-50%)}
+  #debug{margin:12px;border-radius:12px;padding:10px;font-size:12px;line-height:1.35;background:#1a1a1a;border:1px solid #333;opacity:.9}
+  #debug.ok{border-color:#2a7;background:rgba(0,0,0,.15)}
+  #debug.err{border-color:#f44;background:rgba(255,0,0,.08)}
+  .hint{padding:0 12px 14px;font-size:12px;opacity:.7;line-height:1.35}
 </style>
 </head>
 
 <body>
 
 <header>
-  <button onclick="prev()">◀</button>
-  <div id="title"></div>
-  <button onclick="next()">▶</button>
+  <button id="prev">◀</button>
+  <div id="title">Loading…</div>
+  <button id="mode">Shift: Off</button>
+  <button id="next">▶</button>
 </header>
 
-<div class="grid" id="grid"></div>
+<div id="debug">JS not started yet…</div>
+<div id="grid"></div>
+<div class="hint">Tap = colour • Tap Shift: On then tap a date = add text (10-2 / 2-10) • Long-press = clear</div>
 
 <script>
-const colors=["#ff3b30","#34c759","#0a84ff","#ffd60a","#bf5af2"];
-let now=new Date();
-let data=JSON.parse(localStorage.getItem("marks")||"{}");
+(function(){
+  var dbg = document.getElementById("debug");
+  function ok(msg){ dbg.className="ok"; dbg.textContent=msg; }
+  function err(msg){ dbg.className="err"; dbg.textContent=msg; }
 
-function key(d){return d.toISOString().slice(0,10)}
+  try{
+    ok("JS started ✅");
 
-function render(){
-  document.getElementById("title").innerText=
-    now.toLocaleString("default",{month:"long",year:"numeric"});
+    var colors=["#ff3b30","#34c759","#0a84ff","#ffd60a","#bf5af2","#ff9500","#8e8e93"];
+    var STORE="calendar_shift_marks_debug_v1";
 
-  let first=new Date(now.getFullYear(),now.getMonth(),1);
-  let start=new Date(first);
-  start.setDate(first.getDate()-((first.getDay()+6)%7));
+    var now=new Date();
+    var shiftMode=false;
 
-  let g=document.getElementById("grid");
-  g.innerHTML="";
+    function load(){
+      try { return JSON.parse(localStorage.getItem(STORE)||"{}"); }
+      catch(e){ return {}; }
+    }
+    var data=load();
 
-  for(let i=0;i<42;i++){
-    let d=new Date(start);
-    d.setDate(start.getDate()+i);
-    let k=key(d);
+    function save(){ localStorage.setItem(STORE, JSON.stringify(data)); }
 
-    let cell=document.createElement("div");
-    cell.className="day";
-    cell.innerHTML=`<div class="num">${d.getDate()}</div>`;
+    function key(d){
+      var y=d.getFullYear();
+      var m=String(d.getMonth()+1).padStart(2,"0");
+      var day=String(d.getDate()).padStart(2,"0");
+      return y+"-"+m+"-"+day;
+    }
 
-    if(data[k]!=null){
-      let dot=document.createElement("div");
-      dot.className="dot";
-      dot.style.background=colors[data[k]];
-      cell.appendChild(
+    function render(){
+      document.getElementById("title").textContent =
+        now.toLocaleString(undefined,{month:"long",year:"numeric"});
+
+      document.getElementById("mode").textContent = "Shift: " + (shiftMode ? "On" : "Off");
+
+      // Monday start
+      var first=new Date(now.getFullYear(), now.getMonth(), 1);
+      var start=new Date(first);
+      start.setDate(first.getDate()-((first.getDay()+6)%7));
+
+      var grid=document.getElementById("grid");
+      grid.innerHTML="";
+
+      for(var i=0;i<42;i++){
+        var d=new Date(start);
+        d.setDate(start.getDate()+i);
+        var k=key(d);
+
+        var cell=document.createElement("div");
+        cell.className="day";
+
+        var num=document.createElement("div");
+        num.className="num";
+        num.textContent=d.getDate();
+        cell.appendChild(num);
+
+        if(data[k] && data[k].text){
+          var t=document.createElement("div");
+          t.className="shift";
+          t.textContent=data[k].text;
+          cell.appendChild(t);
+        }
+
+        if(data[k] && data[k].c !== undefined){
+          var dot=document.createElement("div");
+          dot.className="dot";
+          dot.style.background=colors[data[k].c % colors.length];
+          cell.appendChild(dot);
+        }
+
+        attach(cell,k);
+        grid.appendChild(cell);
+      }
+
+      ok("Rendered calendar ✅ (If you see this but no grid, tell me)");
+    }
+
+    function attach(cell,k){
+      var timer=null, longPressed=false;
+
+      function clearDate(){
+        delete data[k];
+        save(); render();
+      }
+
+      function tap(){
+        if(shiftMode){
+          var cur = (data[k] && data[k].text) ? data[k].text : "";
+          var txt = prompt("Shift text (10-2, 2-10, OFF):", cur);
+          if(txt===null) return;
+          txt = (txt||"").trim();
+          if(!data[k]) data[k]={};
+          if(txt===""){
+            delete data[k].text;
+            // if no colour either, remove whole entry
+            if(data[k].c===undefined) delete data[k];
+          } else {
+            data[k].text = txt;
+          }
+          save(); render();
+        } else {
+          if(!data[k]) data[k]={};
+          var curC = (data[k].c===undefined) ? -1 : data[k].c;
+          data[k].c = (curC+1) % colors.length;
+          save(); render();
+        }
+      }
+
+      cell.addEventListener("touchstart", function(){
+        longPressed=false;
+        timer=setTimeout(function(){ longPressed=true; clearDate(); }, 650);
+      }, {passive:true});
+
+      cell.addEventListener("touchend", function(){
+        if(timer) clearTimeout(timer);
+        timer=null;
+        if(!longPressed) tap();
+      });
+
+      // Desktop fallback
+      cell.addEventListener("mousedown", function(){
+        longPressed=false;
+        timer=setTimeout(function(){ longPressed=true; clearDate(); }, 650);
+      });
+      cell.addEventListener("mouseup", function(){
+        if(timer) clearTimeout(timer);
+        timer=null;
+        if(!longPressed) tap();
+      });
+      cell.addEventListener("mouseleave", function(){
+        if(timer) clearTimeout(timer);
+        timer=null;
+      });
+    }
+
+    document.getElementById("prev").onclick=function(){
+      now=new Date(now.getFullYear(), now.getMonth()-1, 1);
+      render();
+    };
+    document.getElementById("next").onclick=function(){
+      now=new Date(now.getFullYear(), now.getMonth()+1, 1);
+      render();
+    };
+    document.getElementById("mode").onclick=function(){
+      shiftMode=!shiftMode;
+      render();
     };
 
-    g.appendChild(cell);
-  }
-}
+    render();
 
-function prev(){now.setMonth(now.getMonth()-1);render()}
-function next(){now.setMonth(now.getMonth()+1);render()}
-render();
+  } catch(e){
+    err("JS error ❌: " + (e && e.message ? e.message : e));
+  }
+})();
 </script>
 
 </body>
