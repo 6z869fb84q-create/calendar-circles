@@ -92,13 +92,7 @@ function render(){
       let dot=document.createElement("div");
       dot.className="dot";
       dot.style.background=colors[data[k]];
-      cell.appendChild(dot);
-    }
-
-    cell.onclick=()=>{
-      data[k]=(data[k]+1||0)%colors.length;
-      localStorage.setItem("marks",JSON.stringify(data));
-      render();
+      cell.appendChild(
     };
 
     g.appendChild(cell);
